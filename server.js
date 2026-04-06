@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { Readable } from "node:stream";
 import express from "express";
 
 const app = express();
@@ -49,16 +50,10 @@ app.get("/health", (_req, res) => {
 });
 
 /**
- * 프론트는 API 키 없이 이 엔드포인트만 호출합니다.
- * body: { prompt: string } 또는 Gemini REST와 동일한 { contents, model?, generationConfig? }
+ * @returns {{ model: string, payload: object } | { error: string, status: number }}
  */
-app.post("/api/gemini", async (req, res) => {
-  if (!GEMINI_API_KEY) {
-    res.status(500).json({ error: "GEMINI_API_KEY is not set on the server" });
-    return;
-  }
-
-  const body = req.body ?? {};
+function parseGeminiRequestBody(body) {
+  body = body ?? {};
   const model =
     typeof body.model === "string" && body.model.trim()
       ? body.model.trim()
@@ -70,13 +65,16 @@ app.post("/api/gemini", async (req, res) => {
   }
 
   if (!Array.isArray(contents) || contents.length === 0) {
-    res
-      .status(400)
-      .json({ error: "Send `prompt` (string) or `contents` (array) in JSON body" });
-    return;
+    return {
+      error: "Send `prompt` (string) or `contents` (array) in JSON body",
+      status: 400,
+    };
   }
 
   const payload = { contents };
+  if (body.systemInstruction && typeof body.systemInstruction === "object") {
+    payload.systemInstruction = body.systemInstruction;
+  }
   if (body.generationConfig && typeof body.generationConfig === "object") {
     payload.generationConfig = body.generationConfig;
   }
@@ -84,6 +82,26 @@ app.post("/api/gemini", async (req, res) => {
     payload.safetySettings = body.safetySettings;
   }
 
+  return { model, payload };
+}
+
+/**
+ * 프론트는 API 키 없이 이 엔드포인트만 호출합니다.
+ * body: { prompt: string } 또는 Gemini REST와 동일한 { contents, model?, systemInstruction?, generationConfig? }
+ */
+app.post("/api/gemini", async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    res.status(500).json({ error: "GEMINI_API_KEY is not set on the server" });
+    return;
+  }
+
+  const parsed = parseGeminiRequestBody(req.body);
+  if ("error" in parsed) {
+    res.status(parsed.status).json({ error: parsed.error });
+    return;
+  }
+
+  const { model, payload } = parsed;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
   try {
@@ -100,6 +118,62 @@ app.post("/api/gemini", async (req, res) => {
     res.status(upstream.status).json(data);
   } catch {
     res.status(502).json({ error: "Failed to reach Gemini API" });
+  }
+});
+
+/**
+ * 스트리밍: Google `streamGenerateContent?alt=sse`를 그대로 프록시합니다.
+ */
+app.post("/api/gemini/stream", async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    res.status(500).json({ error: "GEMINI_API_KEY is not set on the server" });
+    return;
+  }
+
+  const parsed = parseGeminiRequestBody(req.body);
+  if ("error" in parsed) {
+    res.status(parsed.status).json({ error: parsed.error });
+    return;
+  }
+
+  const { model, payload } = parsed;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`;
+
+  try {
+    const upstream = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!upstream.ok) {
+      const text = await upstream.text();
+      res.status(upstream.status).type("application/json").send(text || "{}");
+      return;
+    }
+
+    if (!upstream.body) {
+      res.status(502).json({ error: "Empty upstream body" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.status(200);
+    Readable.fromWeb(upstream.body)
+      .on("error", () => {
+        if (!res.writableEnded) res.destroy();
+      })
+      .pipe(res);
+  } catch {
+    if (!res.headersSent) {
+      res.status(502).json({ error: "Failed to reach Gemini API" });
+    }
   }
 });
 
