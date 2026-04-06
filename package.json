@@ -1,0 +1,18 @@
+{
+  "name": "tarot-server",
+  "version": "0.1.0",
+  "description": "Tarot server CLI and scaffold",
+  "type": "module",
+  "bin": {
+    "tarot-server": "./bin/cli.js"
+  },
+  "scripts": {
+    "init": "node bin/cli.js init"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  }
+}
