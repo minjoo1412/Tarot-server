@@ -1,3 +1,3 @@
 # Tarot-server
 
-gemini api 
+gemini api  
