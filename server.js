@@ -9,12 +9,12 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 /** 프로덕션 + 흔한 로컬 프론트 포트. `CORS_ORIGIN`에 콤마로 더 추가 가능 */
 const BUILTIN_CORS_ORIGINS = [
   "https://office-tarot.com",
-  "http://localhost:5173",
-  "http://localhost:3000",
-  "http://localhost:4173",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:3000",
-  "http://127.0.0.1:4173",
+  // "http://localhost:5173",
+  // "http://localhost:3000",
+  // "http://localhost:4173",
+  // "http://127.0.0.1:5173",
+  // "http://127.0.0.1:3000",
+  // "http://127.0.0.1:4173",
 ];
 
 const extraCorsOrigins = (process.env.CORS_ORIGIN ?? "")
@@ -22,7 +22,10 @@ const extraCorsOrigins = (process.env.CORS_ORIGIN ?? "")
   .map((s) => s.trim())
   .filter(Boolean);
 
-const allowedCorsOrigins = new Set([...BUILTIN_CORS_ORIGINS, ...extraCorsOrigins]);
+const allowedCorsOrigins = new Set([
+  ...BUILTIN_CORS_ORIGINS,
+  ...extraCorsOrigins,
+]);
 
 app.use(express.json({ limit: "1mb" }));
 
@@ -151,7 +154,10 @@ app.post("/api/gemini/stream", async (req, res) => {
 
     if (!upstream.ok) {
       const text = await upstream.text();
-      res.status(upstream.status).type("application/json").send(text || "{}");
+      res
+        .status(upstream.status)
+        .type("application/json")
+        .send(text || "{}");
       return;
     }
 
